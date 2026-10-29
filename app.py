@@ -1,5 +1,5 @@
 import os
-import time
+import glob
 import json
 from datetime import datetime
 import streamlit as st
@@ -73,6 +73,28 @@ st.markdown(
         margin-left: 8px;
     }
 
+    .status-badge {
+        display: inline-block;
+        padding: 2px 6px;
+        font-size: 0.70rem;
+        font-weight: 600;
+        border-radius: 4px;
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+    }
+
+    .status-badge-active {
+        display: inline-block;
+        padding: 2px 6px;
+        font-size: 0.70rem;
+        font-weight: 600;
+        border-radius: 4px;
+        background: #ecfdf5;
+        color: #047857;
+        border: 1px solid #a7f3d0;
+    }
+
     .reasoning-box {
         background-color: #f8fafc;
         border-left: 3px solid #64748b;
@@ -90,7 +112,7 @@ st.markdown(
         border: 1px solid #cbd5e1;
         border-radius: 8px;
         padding: 12px 16px;
-        margin-bottom: 16px;
+        margin-bottom: 12px;
     }
 
     .timer-display {
@@ -116,27 +138,39 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- Study Presets for Coding ---
-STUDY_PRESETS = {
-    "Code Mentor (Socratic)": (
-        "You are an expert Computer Science Professor and Code Mentor. "
-        "Your goal is to help the student learn deeply. Break concepts into fundamentals, "
-        "explain algorithmic complexity (Time and Space Big-O), provide clean annotated code, "
-        "and point out common edge cases and best practices."
+# --- Ensure Local Storage Directory Exists ---
+SESSIONS_DIR = os.path.join(os.path.dirname(__file__), "saved_sessions")
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+# --- Teaching & Pedagogy Presets ---
+TEACHING_PRESETS = {
+    "Master Teacher (Deep & Simple Intuition)": (
+        "You are an inspiring, world-class Computer Science Professor and Code Mentor. "
+        "Your mission is to teach the student any topic they ask in depth, but in an extraordinarily simple and intuitive way.\n\n"
+        "Follow this structured pedagogical blueprint for every lesson:\n"
+        "1. Real-World Analogy: Start with a concrete, everyday analogy to establish intuition before introducing technical jargon.\n"
+        "2. The Problem It Solves: Explain why this concept was invented and what fails without it.\n"
+        "3. Step-by-Step Deep-Dive: Walk through the core mechanics logically from the ground up.\n"
+        "4. Mental Model / Diagram: Use clean text diagrams, ASCII art, or step-by-step state traces to visualize flow.\n"
+        "5. Clean, Annotated Code: Provide clear, readable code with descriptive comments on critical lines.\n"
+        "6. Time & Space Complexity: Clearly analyze efficiency (Big-O).\n"
+        "7. Beginner Pitfalls: Point out the 2-3 most common mistakes learners make.\n"
+        "8. Quick Knowledge Check: Finish with a single engaging question or mini-exercise for the student to confirm understanding."
+    ),
+    "Socratic Guide (Interactive Learning)": (
+        "You are a Socratic Coding Tutor. Instead of dumping full solutions, you guide the student step-by-step. "
+        "Explain concepts simply, ask thought-provoking questions, encourage the student to think through edge cases, "
+        "and provide hints that lead them to discover the answer themselves."
     ),
     "Bug Hunter & Code Auditor": (
         "You are a Senior Software Verification Engineer. Analyze submitted code meticulously. "
         "Identify logic bugs, off-by-one errors, memory inefficiencies, concurrency issues, "
         "and security flaws. Provide the corrected implementation with clear explanations."
     ),
-    "Data Structures & Algorithms": (
+    "Algorithms & Data Structures Specialist": (
         "You are an Algorithms Specialist. For every problem, provide: 1) Intuition and brute-force approach, "
         "2) Optimal solution with detailed walkthrough, 3) Time and Space complexity analysis, "
         "4) Python/C++ implementation with comments on non-trivial lines."
-    ),
-    "Concise Technical Reference": (
-        "You are a concise software documentation specialist. Give brief, precise explanations with minimal prose "
-        "and clean, copy-pasteable production-ready code examples."
     ),
 }
 
@@ -148,48 +182,70 @@ if "study_notes" not in st.session_state:
     st.session_state.study_notes = ""
 
 if "timer_seconds" not in st.session_state:
-    st.session_state.timer_seconds = 25 * 60  # 25 min Pomodoro default
+    st.session_state.timer_seconds = 25 * 60
 
-if "timer_running" not in st.session_state:
-    st.session_state.timer_running = False
-
-if "timer_target_end" not in st.session_state:
-    st.session_state.timer_target_end = None
+if "custom_api_key" not in st.session_state:
+    st.session_state.custom_api_key = ""
 
 # --- Sidebar: Workspace & Controls ---
 with st.sidebar:
     st.markdown("### Workspace Controls")
 
-    # API Key Handling (checks st.secrets first, then environment variable)
-    env_key = ""
+    # API Key Configuration
+    st.markdown("#### API Key Management")
+
+    # Determine default/fallback key
+    default_key = ""
     try:
         if hasattr(st, "secrets") and "NVIDIA_API_KEY" in st.secrets:
-            env_key = st.secrets["NVIDIA_API_KEY"]
+            default_key = st.secrets["NVIDIA_API_KEY"]
     except Exception:
         pass
-    if not env_key:
-        env_key = os.getenv("NVIDIA_API_KEY", "")
+    if not default_key:
+        default_key = os.getenv("NVIDIA_API_KEY", "")
 
-    api_key = st.text_input(
+    current_key_val = st.session_state.custom_api_key if st.session_state.custom_api_key else default_key
+
+    entered_key = st.text_input(
         "NVIDIA API Key",
-        value=env_key,
+        value=current_key_val,
         type="password",
-        help="Reads from Streamlit Secrets or NVIDIA_API_KEY environment variable.",
+        help="Paste your personal key here at any time. It takes effect immediately.",
+    )
+
+    if entered_key != st.session_state.custom_api_key:
+        st.session_state.custom_api_key = entered_key
+
+    active_key = st.session_state.custom_api_key if st.session_state.custom_api_key else default_key
+
+    if active_key:
+        if active_key == default_key and default_key:
+            st.markdown('<span class="status-badge">Default System Key Loaded</span>', unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="status-badge-active">Personal Key Active</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="status-badge">No API Key Set</span>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Context Window & Memory Depth
+    st.markdown("#### Context Window (Memory Depth)")
+    context_option = st.select_slider(
+        "Conversation History Included",
+        options=[2, 4, 6, 10, 16, 24, "Full History"],
+        value=10,
+        help="Controls how many previous dialogue turns are sent to the model. Smaller windows reduce token costs; larger windows maintain longer context.",
     )
 
     st.markdown("---")
 
-    # Focus Timer Section
-    st.markdown("#### Study Focus Timer")
-    timer_col1, timer_col2 = st.columns([1, 1])
-
-    with timer_col1:
-        timer_preset = st.selectbox(
-            "Duration",
-            options=["25 min (Pomodoro)", "50 min (Deep Dive)", "15 min (Review)", "5 min (Break)"],
-            index=0,
-            label_visibility="collapsed",
-        )
+    # Focus Study Timer
+    st.markdown("#### Focus Study Timer")
+    timer_preset = st.selectbox(
+        "Duration Preset",
+        options=["25 min (Pomodoro)", "50 min (Deep Dive)", "15 min (Review)", "5 min (Break)"],
+        index=0,
+    )
 
     duration_map = {
         "25 min (Pomodoro)": 25 * 60,
@@ -199,8 +255,6 @@ with st.sidebar:
     }
 
     selected_duration = duration_map[timer_preset]
-
-    # Timer display & controls
     mins, secs = divmod(st.session_state.timer_seconds, 60)
     timer_str = f"{mins:02d}:{secs:02d}"
 
@@ -219,7 +273,6 @@ with st.sidebar:
         if st.button("Reset Timer", use_container_width=True):
             st.session_state.timer_seconds = selected_duration
             st.rerun()
-
     with t_btn_col2:
         if st.button("Set Preset", use_container_width=True):
             st.session_state.timer_seconds = selected_duration
@@ -227,23 +280,23 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Study Persona & Mode
-    st.markdown("#### Learning Persona")
+    # Teaching Persona & Style
+    st.markdown("#### Teaching Mode")
     chosen_preset_name = st.selectbox(
-        "Active Mode",
-        options=list(STUDY_PRESETS.keys()),
+        "Pedagogical Style",
+        options=list(TEACHING_PRESETS.keys()),
         index=0,
     )
 
     system_prompt = st.text_area(
-        "System Instructions",
-        value=STUDY_PRESETS[chosen_preset_name],
-        height=100,
+        "Instructor Guidelines",
+        value=TEACHING_PRESETS[chosen_preset_name],
+        height=130,
     )
 
     st.markdown("---")
 
-    # Model & Reasoning Settings
+    # Model & Reasoning Parameters
     st.markdown("#### Model Parameters")
     model = st.selectbox(
         "Inference Model",
@@ -266,38 +319,83 @@ with st.sidebar:
         value=False,
     )
 
-    with st.expander("Advanced Inference Settings"):
+    with st.expander("Advanced Hyperparameters"):
         temperature = st.slider("Temperature", 0.0, 1.5, 1.0 if enable_thinking else 0.7, 0.05)
         top_p = st.slider("Top-P", 0.01, 1.0, 0.95, 0.01)
-        max_tokens = st.slider("Max Tokens", 512, 16384, 4096, 512)
+        max_tokens = st.slider("Max Output Tokens", 512, 16384, 4096, 512)
 
     st.markdown("---")
 
-    # Session Management & Export
-    st.markdown("#### Chat Records & Export")
+    # Chat Records: Save, Load & Export
+    st.markdown("#### Chat Storage & History")
+
+    # 1. Save Current Session Locally
+    save_col1, save_col2 = st.columns([2, 1])
+    with save_col1:
+        session_title = st.text_input("Session Topic", placeholder="e.g. Recursion Lesson", label_visibility="collapsed")
+    with save_col2:
+        if st.button("Save", use_container_width=True):
+            if st.session_state.messages:
+                clean_title = "".join(c for c in session_title if c.isalnum() or c in (" ", "_", "-")).strip()
+                if not clean_title:
+                    clean_title = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                filename = f"{clean_title}.json"
+                filepath = os.path.join(SESSIONS_DIR, filename)
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(st.session_state.messages, f, indent=2)
+                st.success(f"Saved: {clean_title}")
+                st.rerun()
+            else:
+                st.warning("No messages to save yet.")
+
+    # 2. Load Existing Saved Session
+    saved_files = glob.glob(os.path.join(SESSIONS_DIR, "*.json"))
+    if saved_files:
+        session_names = [os.path.basename(f).replace(".json", "") for f in saved_files]
+        selected_session = st.selectbox("Load Saved Lesson", options=["Select session..."] + session_names)
+        if selected_session != "Select session...":
+            if st.button("Restore Selected Lesson", use_container_width=True):
+                target_file = os.path.join(SESSIONS_DIR, f"{selected_session}.json")
+                with open(target_file, "r", encoding="utf-8") as f:
+                    st.session_state.messages = json.load(f)
+                st.rerun()
+
+    # 3. Import Session from JSON file
+    uploaded_session = st.file_uploader("Upload Past Session (.json)", type=["json"], label_visibility="collapsed")
+    if uploaded_session is not None:
+        if st.button("Load Uploaded File", use_container_width=True):
+            try:
+                loaded_data = json.load(uploaded_session)
+                if isinstance(loaded_data, list):
+                    st.session_state.messages = loaded_data
+                    st.success("Lesson restored successfully.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error reading JSON file: {e}")
+
+    # 4. Export Buttons
     if st.session_state.messages:
-        # Generate Markdown Export
         md_export = f"# Study Session Export - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
         for idx, m in enumerate(st.session_state.messages):
-            role_label = "Student" if m["role"] == "user" else "Nemotron Mentor"
+            role_label = "Student" if m["role"] == "user" else "Nemotron Instructor"
             md_export += f"### {role_label}\n\n"
             if m.get("reasoning"):
                 md_export += f"<details><summary>Reasoning Process</summary>\n\n```text\n{m['reasoning']}\n```\n</details>\n\n"
             md_export += f"{m['content']}\n\n---\n\n"
 
         st.download_button(
-            label="Download Session as Markdown",
+            label="Export as Markdown (.md)",
             data=md_export,
-            file_name=f"study_session_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+            file_name=f"lesson_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
             mime="text/markdown",
             use_container_width=True,
         )
 
         json_export = json.dumps(st.session_state.messages, indent=2)
         st.download_button(
-            label="Download Session as JSON",
+            label="Export as JSON (.json)",
             data=json_export,
-            file_name=f"study_session_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+            file_name=f"lesson_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
             mime="application/json",
             use_container_width=True,
         )
@@ -317,7 +415,7 @@ st.markdown(
                 <span class="study-badge">Reasoning Enabled</span>
             </div>
             <div class="brand-subtitle">
-                Professional Algorithmic Study Environment with Step-by-Step Chain-of-Thought
+                Interactive Coding Professor - Intuitive Explanations, Deep Concepts & Architecture
             </div>
         </div>
     </div>
@@ -326,16 +424,16 @@ st.markdown(
 )
 
 # --- Study Tabs ---
-chat_tab, scratchpad_tab, guide_tab = st.tabs(["Interactive Study Session", "Study Notes & Scratchpad", "Study Guide & Tips"])
+chat_tab, scratchpad_tab, guide_tab = st.tabs(["Interactive Classroom", "Study Notes & Scratchpad", "Teaching Methodology"])
 
 with scratchpad_tab:
     st.markdown("#### Session Notes & Code Scratchpad")
-    st.caption("Jot down algorithmic patterns, definitions, or code snippets here during your study session. Notes persist while this tab is open.")
+    st.caption("Jot down notes, key takeaways, or algorithmic patterns during your lecture. Notes persist across questions.")
     st.session_state.study_notes = st.text_area(
         "Notes Content",
         value=st.session_state.study_notes,
         height=320,
-        placeholder="e.g. Binary Search invariant: low <= high, mid = low + (high - low) // 2 ...",
+        placeholder="e.g. Memory Layout of Pointers: Variable has an address and a value...",
         label_visibility="collapsed",
     )
     if st.session_state.study_notes:
@@ -347,12 +445,13 @@ with scratchpad_tab:
         )
 
 with guide_tab:
-    st.markdown("#### Effective Coding & Study Techniques with Nemotron")
+    st.markdown("#### How Your AI Teacher Explains Topics")
     st.markdown(
         """
-        - **Read the Reasoning Trace**: When tackling complex coding problems, expand the **Model Reasoning** accordion. Seeing how the model breaks down constraints, edge cases, and invariants teaches sound problem-solving intuition.
-        - **Practice Socratic Inquiries**: Instead of asking *"Write code for LRU Cache"*, ask *"What data structures can achieve O(1) get and put in an LRU Cache, and how do they coordinate?"*
-        - **Save Your Study Logs**: Use the sidebar **Download Session as Markdown** button at the end of each study block to build your personal knowledge base in Obsidian, Notion, or GitHub.
+        - **1. Analogies First**: Complex abstractions are anchored in familiar physical metaphors before equations or syntax appear.
+        - **2. The 'Why'**: Explains why computer scientists invented this solution, and what breaks without it.
+        - **3. Trace the Reasoning**: Expand the **Model Reasoning** accordion on any response to see how the teacher analyzes your question before explaining it.
+        - **4. Save & Revisit**: Use the sidebar **Save** button to store your lessons under topics like *Dynamic Programming* or *Memory Management* and reload them anytime.
         """
     )
 
@@ -366,11 +465,11 @@ with chat_tab:
             st.markdown(msg["content"])
 
     # User Input Field
-    user_query = st.chat_input("Enter code to review, ask an algorithm concept, or solve a problem...")
+    user_query = st.chat_input("Enter any topic you want to learn (e.g. Recursion, Pointers, Concurrency, Graph DFS)...")
 
     if user_query:
-        if not api_key:
-            st.error("Please provide an NVIDIA API Key in the sidebar or configure it in Streamlit Cloud Secrets.")
+        if not active_key:
+            st.error("Please provide an NVIDIA API Key in the sidebar.")
             st.stop()
 
         # Append and display user query
@@ -381,11 +480,18 @@ with chat_tab:
         # Initialize client
         client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
-            api_key=api_key,
+            api_key=active_key,
         )
 
+        # Apply Context Window Trimming
+        if context_option == "Full History":
+            selected_history = st.session_state.messages
+        else:
+            num_messages_to_keep = int(context_option) * 2
+            selected_history = st.session_state.messages[-num_messages_to_keep:]
+
         api_messages = [{"role": "system", "content": system_prompt}]
-        for m in st.session_state.messages:
+        for m in selected_history:
             api_messages.append({"role": m["role"], "content": m["content"]})
 
         with st.chat_message("assistant"):
@@ -395,7 +501,7 @@ with chat_tab:
             full_content = ""
 
             if enable_thinking:
-                thought_status = st.status("Analyzing problem and deriving reasoning trace...", expanded=True)
+                thought_status = st.status("Analyzing pedagogy and structuring lesson plan...", expanded=True)
                 with thought_status:
                     thought_placeholder = st.empty()
 
@@ -433,7 +539,7 @@ with chat_tab:
                     if delta.content is not None:
                         if enable_thinking and full_reasoning and thought_status:
                             thought_status.update(
-                                label="Reasoning complete",
+                                label="Lesson plan derived",
                                 state="complete",
                                 expanded=auto_expand_thoughts,
                             )
@@ -445,7 +551,7 @@ with chat_tab:
 
                 if enable_thinking and thought_status:
                     thought_status.update(
-                        label="Reasoning complete" if full_reasoning else "No explicit reasoning trace returned",
+                        label="Lesson plan derived" if full_reasoning else "No explicit reasoning trace returned",
                         state="complete",
                         expanded=auto_expand_thoughts,
                     )
