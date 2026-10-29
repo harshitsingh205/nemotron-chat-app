@@ -1,8 +1,9 @@
 import sqlite3
+import os
 import uuid
 from datetime import datetime
 
-DB_PATH = "classroom.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "classroom.db")
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -95,3 +96,24 @@ def delete_session(session_id):
     cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()
+
+def get_database_stats():
+    """Returns database size, session count, and message count for transparency."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) AS count FROM chat_sessions")
+    session_count = cursor.fetchone()["count"]
+    cursor.execute("SELECT COUNT(*) AS count FROM chat_messages")
+    message_count = cursor.fetchone()["count"]
+    conn.close()
+
+    file_size_kb = 0
+    if os.path.exists(DB_PATH):
+        file_size_kb = round(os.path.getsize(DB_PATH) / 1024, 2)
+
+    return {
+        "path": DB_PATH,
+        "size_kb": file_size_kb,
+        "sessions": session_count,
+        "messages": message_count,
+    }

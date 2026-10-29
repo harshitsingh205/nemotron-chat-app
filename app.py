@@ -15,7 +15,11 @@ st.set_page_config(
 # Initialize SQLite database
 db.init_db()
 
-# --- Professional CSS Styles (No Emojis, Clean Modern Classroom Theme) ---
+# --- Avatars (Clean SVG Data URIs, No Emojis, No Broken Material Fonts) ---
+STUDENT_AVATAR = "https://api.iconify.design/lucide:user.svg?color=%23475569"
+TEACHER_AVATAR = "https://api.iconify.design/lucide:graduation-cap.svg?color=%231e293b"
+
+# --- Professional CSS Styles ---
 st.markdown(
     """
     <style>
@@ -98,6 +102,16 @@ st.markdown(
         border: 1px solid #fecaca;
     }
 
+    .db-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 0.82rem;
+        color: #334155;
+        margin-bottom: 12px;
+    }
+
     .timer-card {
         background: #f1f5f9;
         border: 1px solid #cbd5e1;
@@ -133,10 +147,10 @@ st.markdown(
 PROVIDERS = {
     "NVIDIA NIM": {
         "base_url": "https://integrate.api.nvidia.com/v1",
-        "default_model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "default_model": "meta/llama-3.3-70b-instruct",
         "models": [
-            "nvidia/nemotron-3-ultra-550b-a55b",
             "meta/llama-3.3-70b-instruct",
+            "nvidia/nemotron-3-ultra-550b-a55b",
             "deepseek-ai/deepseek-r1",
             "nvidia/llama-3.1-nemotron-70b-instruct",
         ],
@@ -153,7 +167,7 @@ PROVIDERS = {
         "supports_thinking": True,
         "env_var": "DEEPSEEK_API_KEY",
     },
-    "OpenRouter (Free Models)": {
+    "OpenRouter (Free Tier)": {
         "base_url": "https://openrouter.ai/api/v1",
         "default_model": "deepseek/deepseek-r1:free",
         "models": [
@@ -236,7 +250,7 @@ if "provider_keys" not in st.session_state:
 
 # --- Sidebar: ChatGPT-Style Chat History & Controls ---
 with st.sidebar:
-    # 1. New Chat Button (ChatGPT-Style)
+    # 1. New Chat Button
     if st.button("+ New Lesson", use_container_width=True, type="primary"):
         new_id = db.create_session("New Lesson")
         st.session_state.active_session_id = new_id
@@ -250,7 +264,7 @@ with st.sidebar:
             is_active = (s["id"] == st.session_state.active_session_id)
             btn_col, del_col = st.columns([5, 1])
             with btn_col:
-                label = f"{'▶ ' if is_active else ''}{s['title'][:24]}"
+                label = f"{'▶ ' if is_active else ''}{s['title'][:22]}"
                 if st.button(label, key=f"session_{s['id']}", use_container_width=True):
                     st.session_state.active_session_id = s["id"]
                     st.rerun()
@@ -266,7 +280,7 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 3. Provider & Model Setup (Supports NVIDIA, DeepSeek, OpenRouter, Groq)
+    # 3. Provider & Model Configuration
     st.markdown("#### AI Provider & Model")
     chosen_provider_name = st.selectbox(
         "Provider",
@@ -285,7 +299,6 @@ with st.sidebar:
     if not fallback_key:
         fallback_key = os.getenv(provider_info["env_var"], "")
 
-    # Check session state for user-entered key
     stored_key = st.session_state.provider_keys.get(chosen_provider_name, fallback_key)
 
     api_key_input = st.text_input(
@@ -302,7 +315,6 @@ with st.sidebar:
     else:
         st.markdown('<span class="status-badge-warn">API Key Required</span>', unsafe_allow_html=True)
 
-    # Base URL & Model input
     if chosen_provider_name == "Custom OpenAI-Compatible":
         base_url = st.text_input("Custom Base URL", value="https://api.openai.com/v1")
         model = st.text_input("Custom Model Name", value="gpt-4o")
@@ -398,7 +410,7 @@ st.markdown(
 session_messages = db.get_session_messages(st.session_state.active_session_id)
 
 # --- Study Tabs ---
-chat_tab, scratchpad_tab, export_tab = st.tabs(["Interactive Classroom", "Study Notes & Scratchpad", "Export & Backup"])
+chat_tab, scratchpad_tab, storage_tab = st.tabs(["Interactive Classroom", "Study Notes & Scratchpad", "Database & Storage Transparency"])
 
 with scratchpad_tab:
     st.markdown("#### Session Notes & Code Scratchpad")
@@ -407,7 +419,7 @@ with scratchpad_tab:
         "Notes Content",
         value=st.session_state.study_notes,
         height=320,
-        placeholder="e.g. Recursion Base Case: condition where recursion stops to prevent stack overflow...",
+        placeholder="e.g. Array indexing is O(1) contiguous memory...",
         label_visibility="collapsed",
     )
     if st.session_state.study_notes:
@@ -418,54 +430,70 @@ with scratchpad_tab:
             mime="text/plain",
         )
 
-with export_tab:
-    st.markdown("#### Export Current Lesson")
-    if session_messages:
-        md_export = f"# Classroom Lesson Export - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-        for m in session_messages:
-            role_label = "Student" if m["role"] == "user" else "Instructor"
-            md_export += f"### {role_label}\n\n"
-            if m.get("reasoning"):
-                md_export += f"<details><summary>Reasoning Process</summary>\n\n```text\n{m['reasoning']}\n```\n</details>\n\n"
-            md_export += f"{m['content']}\n\n---\n\n"
+with storage_tab:
+    st.markdown("#### Database Storage Location & Transparency")
+    stats = db.get_database_stats()
+    st.markdown(
+        f"""
+        <div class="db-card">
+            <strong>Database Type:</strong> SQLite 3 (ACID-Compliant Relational Database)<br>
+            <strong>Storage File Location:</strong> <code>{stats['path']}</code><br>
+            <strong>Total Saved Lessons:</strong> {stats['sessions']}<br>
+            <strong>Total Message Turns:</strong> {stats['messages']}<br>
+            <strong>Database File Size:</strong> {stats['size_kb']} KB
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        st.download_button(
-            label="Download Lesson as Markdown (.md)",
-            data=md_export,
-            file_name=f"classroom_lesson_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
-            mime="text/markdown",
-            use_container_width=True,
-        )
+    db_down_col1, db_down_col2 = st.columns(2)
+    with db_down_col1:
+        if os.path.exists(stats["path"]):
+            with open(stats["path"], "rb") as db_file:
+                st.download_button(
+                    label="Download Raw Database (.db file)",
+                    data=db_file.read(),
+                    file_name="classroom.db",
+                    mime="application/x-sqlite3",
+                    use_container_width=True,
+                )
+    with db_down_col2:
+        if session_messages:
+            md_export = f"# Classroom Lesson Export - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            for m in session_messages:
+                role_label = "Student" if m["role"] == "user" else "Instructor"
+                md_export += f"### {role_label}\n\n"
+                if m.get("reasoning"):
+                    md_export += f"<details><summary>Reasoning Process</summary>\n\n```text\n{m['reasoning']}\n```\n</details>\n\n"
+                md_export += f"{m['content']}\n\n---\n\n"
 
-        json_export = json.dumps(session_messages, indent=2)
-        st.download_button(
-            label="Download Lesson as JSON (.json)",
-            data=json_export,
-            file_name=f"classroom_lesson_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-    else:
-        st.caption("No messages to export in this lesson yet.")
+            st.download_button(
+                label="Export Current Lesson as Markdown (.md)",
+                data=md_export,
+                file_name=f"lesson_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
 
 with chat_tab:
-    # Render Chat History from SQLite
+    # Render Chat History with Clean SVG Avatars (No Emojis, No Material Font Artifacts)
     for msg in session_messages:
-        with st.chat_message(msg["role"]):
+        avatar = STUDENT_AVATAR if msg["role"] == "user" else TEACHER_AVATAR
+        with st.chat_message(msg["role"], avatar=avatar):
             if msg.get("reasoning"):
                 with st.expander("Model Reasoning & Chain-of-Thought", expanded=auto_expand_thoughts):
                     st.markdown(f"```text\n{msg['reasoning']}\n```")
             st.markdown(msg["content"])
 
     # User Input Field
-    user_query = st.chat_input("Enter any topic you want to learn (e.g. Recursion, Pointers, Concurrency, Graph DFS)...")
+    user_query = st.chat_input("Enter any topic you want to learn (e.g. Arrays, Recursion, Pointers, Graph DFS)...")
 
     if user_query:
         if not active_api_key:
             st.error(f"Please provide an API Key for {chosen_provider_name} in the sidebar.")
             st.stop()
 
-        # If this is the first message in the session, update session title to the topic
+        # Auto-update session title on first message
         if len(session_messages) == 0:
             short_title = user_query[:32] + ("..." if len(user_query) > 32 else "")
             db.update_session_title(st.session_state.active_session_id, short_title)
@@ -473,20 +501,18 @@ with chat_tab:
         # Save student message to SQLite
         db.add_message(st.session_state.active_session_id, "user", user_query)
 
-        with st.chat_message("user"):
+        with st.chat_message("user", avatar=STUDENT_AVATAR):
             st.markdown(user_query)
 
-        # Reload updated messages from SQLite
         updated_messages = db.get_session_messages(st.session_state.active_session_id)
 
-        # Apply Context Window Trimming
+        # Truncate context according to slider
         if context_option == "Full History":
             selected_history = updated_messages
         else:
             num_to_keep = int(context_option) * 2
             selected_history = updated_messages[-num_to_keep:]
 
-        # Initialize OpenAI client with selected provider
         client = OpenAI(
             base_url=base_url,
             api_key=active_api_key,
@@ -496,7 +522,7 @@ with chat_tab:
         for m in selected_history:
             api_messages.append({"role": m["role"], "content": m["content"]})
 
-        with st.chat_message("assistant"):
+        with st.chat_message("assistant", avatar=TEACHER_AVATAR):
             thought_placeholder = None
             thought_status = None
             full_reasoning = ""
@@ -509,73 +535,95 @@ with chat_tab:
 
             response_placeholder = st.empty()
 
-            # Extra body logic per provider
-            extra_body = {}
-            if enable_thinking and chosen_provider_name == "NVIDIA NIM":
-                extra_body["chat_template_kwargs"] = {"enable_thinking": True}
+            # Attempt stream with automatic model failover
+            def execute_stream(target_model, with_thinking):
+                extra_body = {}
+                if with_thinking and chosen_provider_name == "NVIDIA NIM":
+                    extra_body["chat_template_kwargs"] = {"enable_thinking": True}
 
-            try:
-                completion = client.chat.completions.create(
-                    model=model,
+                return client.chat.completions.create(
+                    model=target_model,
                     messages=api_messages,
-                    temperature=1.0 if enable_thinking else 0.7,
+                    temperature=1.0 if with_thinking else 0.7,
                     extra_body=extra_body if extra_body else None,
                     stream=True,
                 )
 
-                for chunk in completion:
-                    if not chunk.choices:
-                        continue
+            current_model = model
+            completion = None
 
-                    delta = chunk.choices[0].delta
-
-                    # 1. Reasoning trace (NVIDIA, DeepSeek reasoner, etc.)
-                    reasoning_chunk = getattr(delta, "reasoning_content", None)
-                    if reasoning_chunk:
-                        full_reasoning += reasoning_chunk
-                        if thought_placeholder:
-                            thought_placeholder.markdown(f"```text\n{full_reasoning}\n```")
-
-                    # 2. Content
-                    if delta.content is not None:
-                        if enable_thinking and full_reasoning and thought_status:
-                            thought_status.update(
-                                label="Lesson plan derived",
-                                state="complete",
-                                expanded=auto_expand_thoughts,
-                            )
-                        full_content += delta.content
-                        response_placeholder.markdown(full_content + "▌")
-
-                # Final render
-                response_placeholder.markdown(full_content)
-
-                if enable_thinking and thought_status:
-                    thought_status.update(
-                        label="Lesson plan derived" if full_reasoning else "No explicit reasoning trace returned",
-                        state="complete",
-                        expanded=auto_expand_thoughts,
-                    )
-
-                # Save assistant response to SQLite database
-                db.add_message(
-                    st.session_state.active_session_id,
-                    "assistant",
-                    full_content,
-                    full_reasoning if full_reasoning else None,
-                )
-
+            try:
+                completion = execute_stream(current_model, enable_thinking)
             except Exception as e:
-                err_str = str(e)
-                if "403" in err_str:
-                    st.error(
-                        f"**Authentication / Quota Error (HTTP 403) from {chosen_provider_name}**\n\n"
-                        f"Your API key was rejected or the free trial credits for `{model}` have expired.\n\n"
-                        "**Quick Solutions:**\n"
-                        "1. **Switch Model**: In the sidebar, try `meta/llama-3.3-70b-instruct`.\n"
-                        "2. **Use Free OpenRouter Models**: In the sidebar, select **OpenRouter (Free Models)** and use `deepseek/deepseek-r1:free` or `meta-llama/llama-3.3-70b-instruct:free`.\n"
-                        "3. **Use DeepSeek or Groq**: Switch provider to DeepSeek or Groq in the sidebar and paste a free key.\n"
-                        "4. **Update Key**: Paste a fresh key directly into the API Key input in the sidebar."
-                    )
+                err_text = str(e)
+                # Auto-failover: If Nemotron 550B hit 403 or quota, auto-failover to Llama 3.3 70B
+                if ("403" in err_text or "quota" in err_text.lower()) and current_model == "nvidia/nemotron-3-ultra-550b-a55b":
+                    st.info("Notice: nvidia/nemotron-3-ultra-550b-a55b quota reached. Automatically switching to meta/llama-3.3-70b-instruct.")
+                    current_model = "meta/llama-3.3-70b-instruct"
+                    try:
+                        completion = execute_stream(current_model, False)
+                    except Exception as e2:
+                        st.error(f"Failover error: {e2}")
+                elif "chat_template_kwargs" in err_text:
+                    # Model doesn't support chat_template_kwargs -> retry without it
+                    try:
+                        completion = execute_stream(current_model, False)
+                    except Exception as e3:
+                        st.error(f"Inference error: {e3}")
                 else:
-                    st.error(f"Inference error from {chosen_provider_name}: {e}")
+                    if "403" in err_text:
+                        st.error(
+                            f"**Authentication / Quota Error (HTTP 403) from {chosen_provider_name}**\n\n"
+                            f"Your API key was rejected or trial credits for `{current_model}` are exhausted.\n\n"
+                            "**Easy Solutions:**\n"
+                            "1. **Switch Model**: Select `meta/llama-3.3-70b-instruct` in the sidebar (high quota).\n"
+                            "2. **Use Free OpenRouter Models**: Select **OpenRouter (Free Tier)** in the sidebar (`deepseek-r1:free`).\n"
+                            "3. **Update Key**: Paste a fresh key directly into the sidebar field."
+                        )
+                    else:
+                        st.error(f"Inference error: {e}")
+
+            if completion is not None:
+                try:
+                    for chunk in completion:
+                        if not chunk.choices:
+                            continue
+
+                        delta = chunk.choices[0].delta
+
+                        # 1. Reasoning trace
+                        reasoning_chunk = getattr(delta, "reasoning_content", None)
+                        if reasoning_chunk:
+                            full_reasoning += reasoning_chunk
+                            if thought_placeholder:
+                                thought_placeholder.markdown(f"```text\n{full_reasoning}\n```")
+
+                        # 2. Content
+                        if delta.content is not None:
+                            if enable_thinking and full_reasoning and thought_status:
+                                thought_status.update(
+                                    label="Lesson plan derived",
+                                    state="complete",
+                                    expanded=auto_expand_thoughts,
+                                )
+                            full_content += delta.content
+                            response_placeholder.markdown(full_content + "▌")
+
+                    response_placeholder.markdown(full_content)
+
+                    if enable_thinking and thought_status:
+                        thought_status.update(
+                            label="Lesson plan derived" if full_reasoning else "Lesson response complete",
+                            state="complete",
+                            expanded=auto_expand_thoughts,
+                        )
+
+                    # Persist response to SQLite database
+                    db.add_message(
+                        st.session_state.active_session_id,
+                        "assistant",
+                        full_content,
+                        full_reasoning if full_reasoning else None,
+                    )
+                except Exception as stream_err:
+                    st.error(f"Stream interruption: {stream_err}")
