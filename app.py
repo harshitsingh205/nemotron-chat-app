@@ -7,7 +7,7 @@ import database as db
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Classroom - AI Code Mentor",
+    page_title="Classroom - AI Computer Science Mentor",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -15,7 +15,7 @@ st.set_page_config(
 # Initialize SQLite database
 db.init_db()
 
-# --- Avatars (Clean SVG Data URIs, No Emojis, No Broken Material Fonts) ---
+# --- Avatars (Clean SVG Icons, No Broken Fonts, No Emojis) ---
 STUDENT_AVATAR = "https://api.iconify.design/lucide:user.svg?color=%23475569"
 TEACHER_AVATAR = "https://api.iconify.design/lucide:graduation-cap.svg?color=%231e293b"
 
@@ -138,34 +138,39 @@ st.markdown(
         text-align: center;
         letter-spacing: 0.8px;
     }
+
+    .topic-pill {
+        display: inline-block;
+        background: #f1f5f9;
+        border: 1px solid #cbd5e1;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 0.8rem;
+        color: #334155;
+        margin-right: 6px;
+        margin-bottom: 6px;
+        cursor: pointer;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# --- Provider Presets ---
+# --- Verified Live Active Providers and Model IDs ---
 PROVIDERS = {
     "NVIDIA NIM": {
         "base_url": "https://integrate.api.nvidia.com/v1",
-        "default_model": "meta/llama-3.3-70b-instruct",
+        "default_model": "nvidia/llama-3.1-nemotron-70b-instruct",
         "models": [
-            "meta/llama-3.3-70b-instruct",
-            "nvidia/nemotron-3-ultra-550b-a55b",
-            "deepseek-ai/deepseek-r1",
             "nvidia/llama-3.1-nemotron-70b-instruct",
+            "nvidia/nemotron-4-340b-instruct",
+            "mistralai/mistral-large-2-instruct",
+            "meta/codellama-70b",
+            "ibm/granite-3.0-8b-instruct",
+            "nvidia/nemotron-3-ultra-550b-a55b",
         ],
         "supports_thinking": True,
         "env_var": "NVIDIA_API_KEY",
-    },
-    "DeepSeek (Official)": {
-        "base_url": "https://api.deepseek.com",
-        "default_model": "deepseek-chat",
-        "models": [
-            "deepseek-chat",
-            "deepseek-reasoner",
-        ],
-        "supports_thinking": True,
-        "env_var": "DEEPSEEK_API_KEY",
     },
     "OpenRouter (Free Tier)": {
         "base_url": "https://openrouter.ai/api/v1",
@@ -178,6 +183,16 @@ PROVIDERS = {
         ],
         "supports_thinking": False,
         "env_var": "OPENROUTER_API_KEY",
+    },
+    "DeepSeek (Official)": {
+        "base_url": "https://api.deepseek.com",
+        "default_model": "deepseek-chat",
+        "models": [
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
+        "supports_thinking": True,
+        "env_var": "DEEPSEEK_API_KEY",
     },
     "Groq (Ultra-Fast Free Tier)": {
         "base_url": "https://api.groq.com/openai/v1",
@@ -247,6 +262,9 @@ if "timer_seconds" not in st.session_state:
 
 if "provider_keys" not in st.session_state:
     st.session_state.provider_keys = {}
+
+if "suggested_prompt" not in st.session_state:
+    st.session_state.suggested_prompt = None
 
 # --- Sidebar: ChatGPT-Style Chat History & Controls ---
 with st.sidebar:
@@ -476,7 +494,28 @@ with storage_tab:
             )
 
 with chat_tab:
-    # Render Chat History with Clean SVG Avatars (No Emojis, No Material Font Artifacts)
+    # Quick Topic Starter Buttons if chat is empty
+    if len(session_messages) == 0:
+        st.markdown("**Suggested Topics to Explore:**")
+        chip1, chip2, chip3, chip4 = st.columns(4)
+        with chip1:
+            if st.button("Arrays & Contiguous Memory", use_container_width=True):
+                st.session_state.suggested_prompt = "Explain how Arrays work in memory, why indexing is O(1), and common edge cases."
+                st.rerun()
+        with chip2:
+            if st.button("Recursion vs Iteration", use_container_width=True):
+                st.session_state.suggested_prompt = "Teach me Recursion from scratch with a call stack diagram and contrast it with iteration."
+                st.rerun()
+        with chip3:
+            if st.button("Pointers & Dynamic Memory", use_container_width=True):
+                st.session_state.suggested_prompt = "Explain Pointers and Heap vs Stack memory in simple terms using a real-world analogy."
+                st.rerun()
+        with chip4:
+            if st.button("Dynamic Programming", use_container_width=True):
+                st.session_state.suggested_prompt = "Break down Dynamic Programming, memoization, and tabulation with an intuitive example."
+                st.rerun()
+
+    # Render Chat History
     for msg in session_messages:
         avatar = STUDENT_AVATAR if msg["role"] == "user" else TEACHER_AVATAR
         with st.chat_message(msg["role"], avatar=avatar):
@@ -485,24 +524,30 @@ with chat_tab:
                     st.markdown(f"```text\n{msg['reasoning']}\n```")
             st.markdown(msg["content"])
 
-    # User Input Field
-    user_query = st.chat_input("Enter any topic you want to learn (e.g. Arrays, Recursion, Pointers, Graph DFS)...")
+    # Handle Suggested Prompt or Direct Input
+    active_prompt = None
+    if st.session_state.suggested_prompt:
+        active_prompt = st.session_state.suggested_prompt
+        st.session_state.suggested_prompt = None
+    else:
+        # st.chat_input natively sends immediately when the user presses Enter
+        active_prompt = st.chat_input("Enter any topic (press Enter to send)...")
 
-    if user_query:
+    if active_prompt:
         if not active_api_key:
             st.error(f"Please provide an API Key for {chosen_provider_name} in the sidebar.")
             st.stop()
 
         # Auto-update session title on first message
         if len(session_messages) == 0:
-            short_title = user_query[:32] + ("..." if len(user_query) > 32 else "")
+            short_title = active_prompt[:32] + ("..." if len(active_prompt) > 32 else "")
             db.update_session_title(st.session_state.active_session_id, short_title)
 
         # Save student message to SQLite
-        db.add_message(st.session_state.active_session_id, "user", user_query)
+        db.add_message(st.session_state.active_session_id, "user", active_prompt)
 
         with st.chat_message("user", avatar=STUDENT_AVATAR):
-            st.markdown(user_query)
+            st.markdown(active_prompt)
 
         updated_messages = db.get_session_messages(st.session_state.active_session_id)
 
@@ -535,7 +580,6 @@ with chat_tab:
 
             response_placeholder = st.empty()
 
-            # Attempt stream with automatic model failover
             def execute_stream(target_model, with_thinking):
                 extra_body = {}
                 if with_thinking and chosen_provider_name == "NVIDIA NIM":
@@ -556,32 +600,33 @@ with chat_tab:
                 completion = execute_stream(current_model, enable_thinking)
             except Exception as e:
                 err_text = str(e)
-                # Auto-failover: If Nemotron 550B hit 403 or quota, auto-failover to Llama 3.3 70B
-                if ("403" in err_text or "quota" in err_text.lower()) and current_model == "nvidia/nemotron-3-ultra-550b-a55b":
-                    st.info("Notice: nvidia/nemotron-3-ultra-550b-a55b quota reached. Automatically switching to meta/llama-3.3-70b-instruct.")
-                    current_model = "meta/llama-3.3-70b-instruct"
-                    try:
-                        completion = execute_stream(current_model, False)
-                    except Exception as e2:
-                        st.error(f"Failover error: {e2}")
-                elif "chat_template_kwargs" in err_text:
-                    # Model doesn't support chat_template_kwargs -> retry without it
-                    try:
-                        completion = execute_stream(current_model, False)
-                    except Exception as e3:
-                        st.error(f"Inference error: {e3}")
-                else:
-                    if "403" in err_text:
+                # Auto-failover: If the requested model is gone (410) or unauthorized/quota (403)
+                if "410" in err_text or "403" in err_text:
+                    if chosen_provider_name == "NVIDIA NIM" and current_model != "nvidia/llama-3.1-nemotron-70b-instruct":
+                        st.info("Auto-switching to verified active model: nvidia/llama-3.1-nemotron-70b-instruct")
+                        current_model = "nvidia/llama-3.1-nemotron-70b-instruct"
+                        try:
+                            completion = execute_stream(current_model, False)
+                        except Exception as e2:
+                            err_text = str(e2)
+
+                if completion is None:
+                    if "403" in err_text or "Authorization failed" in err_text:
                         st.error(
-                            f"**Authentication / Quota Error (HTTP 403) from {chosen_provider_name}**\n\n"
-                            f"Your API key was rejected or trial credits for `{current_model}` are exhausted.\n\n"
-                            "**Easy Solutions:**\n"
-                            "1. **Switch Model**: Select `meta/llama-3.3-70b-instruct` in the sidebar (high quota).\n"
-                            "2. **Use Free OpenRouter Models**: Select **OpenRouter (Free Tier)** in the sidebar (`deepseek-r1:free`).\n"
-                            "3. **Update Key**: Paste a fresh key directly into the sidebar field."
+                            f"**Authorization Failed (HTTP 403) for {chosen_provider_name}**\n\n"
+                            "Your API key was rejected by the provider (it may have expired or exhausted its free trial allotment).\n\n"
+                            "**How to get it running in 30 seconds:**\n"
+                            "1. **Option A (Free OpenRouter)**: In the sidebar, change Provider to **OpenRouter (Free Tier)**. Get an instant free key at [openrouter.ai](https://openrouter.ai/) (no credit card) and use `deepseek/deepseek-r1:free`.\n"
+                            "2. **Option B (Free Groq)**: In the sidebar, select **Groq (Ultra-Fast Free Tier)** with a free key from [console.groq.com](https://console.groq.com/).\n"
+                            "3. **Option C (NVIDIA)**: Generate a fresh key at [build.nvidia.com](https://build.nvidia.com/) and paste it directly into the sidebar field."
+                        )
+                    elif "410" in err_text:
+                        st.error(
+                            f"**Model Deprecated / Gone (HTTP 410)**: `{current_model}` is no longer hosted at this endpoint. "
+                            "Please choose `nvidia/llama-3.1-nemotron-70b-instruct` from the model list in the sidebar."
                         )
                     else:
-                        st.error(f"Inference error: {e}")
+                        st.error(f"Inference error: {err_text}")
 
             if completion is not None:
                 try:
