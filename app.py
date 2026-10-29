@@ -41,13 +41,21 @@ st.markdown(
 with st.sidebar:
     st.title("⚙️ Model Controls")
 
-    # API Key Handling
-    env_key = os.getenv("NVIDIA_API_KEY", "")
+    # API Key Handling (checks st.secrets first, then environment variable)
+    env_key = ""
+    try:
+        if hasattr(st, "secrets") and "NVIDIA_API_KEY" in st.secrets:
+            env_key = st.secrets["NVIDIA_API_KEY"]
+    except Exception:
+        pass
+    if not env_key:
+        env_key = os.getenv("NVIDIA_API_KEY", "")
+
     api_key = st.text_input(
         "NVIDIA API Key",
         value=env_key,
         type="password",
-        help="Get your key at build.nvidia.com. Can also be set as NVIDIA_API_KEY environment variable.",
+        help="Get your key at build.nvidia.com. Can also be set in Streamlit Secrets or NVIDIA_API_KEY env var.",
     )
 
     st.divider()
@@ -110,7 +118,7 @@ with st.sidebar:
     system_prompt = st.text_area(
         "System Prompt",
         value="You are a helpful, deep-thinking AI assistant powered by NVIDIA Nemotron. Provide clear, well-structured, and rigorous answers.",
-        rows=4,
+        height=120,
     )
 
     st.divider()
