@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime
 import streamlit as st
+import streamlit.components.v1 as components
 from openai import OpenAI
 import database as db
 
@@ -15,7 +16,7 @@ st.set_page_config(
 # Initialize SQLite database
 db.init_db()
 
-# --- Avatars (Clean SVG Icons, No Broken Fonts, No Emojis) ---
+# --- Avatars (Clean SVG Icons, No Font Glitches) ---
 STUDENT_AVATAR = "https://api.iconify.design/lucide:user.svg?color=%23475569"
 TEACHER_AVATAR = "https://api.iconify.design/lucide:graduation-cap.svg?color=%231e293b"
 
@@ -112,74 +113,59 @@ st.markdown(
         margin-bottom: 12px;
     }
 
-    .timer-card {
-        background: #f1f5f9;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 10px 14px;
-        margin-bottom: 12px;
-    }
-
-    .timer-display {
+    .reasoning-box {
+        background-color: #f8fafc;
+        border-left: 3px solid #6366f1;
+        padding: 12px 14px;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #0f172a;
-        text-align: center;
-        letter-spacing: 2px;
-        margin: 4px 0;
-    }
-
-    .timer-label {
-        font-size: 0.70rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        color: #64748b;
-        text-align: center;
-        letter-spacing: 0.8px;
-    }
-
-    .topic-pill {
-        display: inline-block;
-        background: #f1f5f9;
-        border: 1px solid #cbd5e1;
-        padding: 4px 10px;
-        border-radius: 16px;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
         color: #334155;
-        margin-right: 6px;
-        margin-bottom: 6px;
-        cursor: pointer;
+        border-radius: 0 6px 6px 0;
+        margin-bottom: 10px;
+        line-height: 1.5;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# --- Verified Live Active Providers and Model IDs ---
+# --- Fallback Configured Keys (from Streamlit Secrets or Environment) ---
+CONFIGURED_KEYS = {}
+
+
+# --- Verified Live Providers and Model IDs ---
 PROVIDERS = {
     "NVIDIA NIM": {
         "base_url": "https://integrate.api.nvidia.com/v1",
-        "default_model": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "default_model": "nvidia/nemotron-3-ultra-550b-a55b",
         "models": [
+            "nvidia/nemotron-3-ultra-550b-a55b",
             "nvidia/llama-3.1-nemotron-70b-instruct",
             "nvidia/nemotron-4-340b-instruct",
             "mistralai/mistral-large-2-instruct",
             "meta/codellama-70b",
-            "ibm/granite-3.0-8b-instruct",
-            "nvidia/nemotron-3-ultra-550b-a55b",
         ],
         "supports_thinking": True,
         "env_var": "NVIDIA_API_KEY",
     },
+    "Groq (Ultra-Fast Free Tier)": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "default_model": "openai/gpt-oss-120b",
+        "models": [
+            "openai/gpt-oss-120b",
+            "qwen/qwen3.8-27b",
+            "openai/gpt-oss-20b",
+        ],
+        "supports_thinking": True,
+        "env_var": "GROQ_API_KEY",
+    },
     "OpenRouter (Free Tier)": {
         "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "deepseek/deepseek-r1:free",
+        "default_model": "particle-ai/particle-1",
         "models": [
-            "deepseek/deepseek-r1:free",
-            "meta-llama/llama-3.3-70b-instruct:free",
-            "google/gemini-2.0-flash-exp:free",
-            "qwen/qwen-2.5-coder-32b-instruct:free",
+            "particle-ai/particle-1",
+            "meta-llama/llama-3.2-3b-instruct:free",
+            "mistralai/mistral-7b-instruct:free",
         ],
         "supports_thinking": False,
         "env_var": "OPENROUTER_API_KEY",
@@ -193,17 +179,6 @@ PROVIDERS = {
         ],
         "supports_thinking": True,
         "env_var": "DEEPSEEK_API_KEY",
-    },
-    "Groq (Ultra-Fast Free Tier)": {
-        "base_url": "https://api.groq.com/openai/v1",
-        "default_model": "llama-3.3-70b-versatile",
-        "models": [
-            "llama-3.3-70b-versatile",
-            "deepseek-r1-distill-llama-70b",
-            "llama3-70b-8192",
-        ],
-        "supports_thinking": False,
-        "env_var": "GROQ_API_KEY",
     },
     "Custom OpenAI-Compatible": {
         "base_url": "https://api.openai.com/v1",
@@ -257,9 +232,6 @@ if "active_session_id" not in st.session_state:
 if "study_notes" not in st.session_state:
     st.session_state.study_notes = ""
 
-if "timer_seconds" not in st.session_state:
-    st.session_state.timer_seconds = 25 * 60
-
 if "provider_keys" not in st.session_state:
     st.session_state.provider_keys = {}
 
@@ -298,7 +270,102 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 3. Provider & Model Configuration
+    # 3. Interactive Live Study Timer (Runs smoothly in browser without page reloads)
+    st.markdown("#### Focus Study Timer")
+    timer_html = """
+    <div style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:8px; padding:12px; text-align:center; font-family:'Inter',sans-serif;">
+        <div style="font-size:0.75rem; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.8px;">Live Study Interval</div>
+        <div id="clock" style="font-family:'Courier New',Courier,monospace; font-size:2.1rem; font-weight:700; color:#0f172a; margin:8px 0; letter-spacing:2px;">25:00</div>
+        
+        <div style="display:flex; justify-content:center; gap:6px; margin-bottom:8px;">
+            <button id="startBtn" onclick="toggleTimer()" style="background:#1e293b; color:#fff; border:none; padding:6px 14px; border-radius:5px; font-weight:600; font-size:0.8rem; cursor:pointer;">Start</button>
+            <button onclick="resetTimer()" style="background:#e2e8f0; color:#1e293b; border:none; padding:6px 14px; border-radius:5px; font-weight:600; font-size:0.8rem; cursor:pointer;">Reset</button>
+        </div>
+
+        <div style="display:flex; justify-content:center; gap:4px;">
+            <button onclick="setMinutes(25)" style="background:#fff; border:1px solid #cbd5e1; font-size:0.72rem; padding:3px 6px; border-radius:4px; cursor:pointer;">25m</button>
+            <button onclick="setMinutes(50)" style="background:#fff; border:1px solid #cbd5e1; font-size:0.72rem; padding:3px 6px; border-radius:4px; cursor:pointer;">50m</button>
+            <button onclick="setMinutes(15)" style="background:#fff; border:1px solid #cbd5e1; font-size:0.72rem; padding:3px 6px; border-radius:4px; cursor:pointer;">15m</button>
+            <button onclick="setMinutes(5)" style="background:#fff; border:1px solid #cbd5e1; font-size:0.72rem; padding:3px 6px; border-radius:4px; cursor:pointer;">5m</button>
+        </div>
+        <div id="statusText" style="font-size:0.72rem; color:#64748b; margin-top:6px;">Ready to focus</div>
+    </div>
+
+    <script>
+        let totalSeconds = 25 * 60;
+        let remainingSeconds = totalSeconds;
+        let isRunning = false;
+        let interval = null;
+
+        function updateDisplay() {
+            let mins = Math.floor(remainingSeconds / 60);
+            let secs = remainingSeconds % 60;
+            document.getElementById('clock').innerText = 
+                (mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs;
+        }
+
+        function toggleTimer() {
+            let btn = document.getElementById('startBtn');
+            let status = document.getElementById('statusText');
+            if (!isRunning) {
+                isRunning = true;
+                btn.innerText = 'Pause';
+                btn.style.background = '#d97706';
+                status.innerText = 'Focus interval in progress';
+                interval = setInterval(function() {
+                    if (remainingSeconds > 0) {
+                        remainingSeconds--;
+                        updateDisplay();
+                    } else {
+                        clearInterval(interval);
+                        isRunning = false;
+                        btn.innerText = 'Start';
+                        btn.style.background = '#1e293b';
+                        status.innerText = 'Interval complete! Take a break.';
+                        try {
+                            let ctx = new (window.AudioContext || window.webkitAudioContext)();
+                            let osc = ctx.createOscillator();
+                            osc.type = 'sine';
+                            osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+                            osc.connect(ctx.destination);
+                            osc.start();
+                            osc.stop(ctx.currentTime + 0.4);
+                        } catch(e) {}
+                    }
+                }, 1000);
+            } else {
+                isRunning = false;
+                clearInterval(interval);
+                btn.innerText = 'Resume';
+                btn.style.background = '#1e293b';
+                status.innerText = 'Paused';
+            }
+        }
+
+        function resetTimer() {
+            clearInterval(interval);
+            isRunning = false;
+            remainingSeconds = totalSeconds;
+            updateDisplay();
+            let btn = document.getElementById('startBtn');
+            btn.innerText = 'Start';
+            btn.style.background = '#1e293b';
+            document.getElementById('statusText').innerText = 'Ready to focus';
+        }
+
+        function setMinutes(m) {
+            totalSeconds = m * 60;
+            resetTimer();
+        }
+
+        updateDisplay();
+    </script>
+    """
+    components.html(timer_html, height=160)
+
+    st.markdown("---")
+
+    # 4. Provider & Model Configuration
     st.markdown("#### AI Provider & Model")
     chosen_provider_name = st.selectbox(
         "Provider",
@@ -307,8 +374,8 @@ with st.sidebar:
     )
     provider_info = PROVIDERS[chosen_provider_name]
 
-    # Resolve default key from secrets or env
-    fallback_key = ""
+    # Resolve default key from configured defaults, secrets, or env
+    fallback_key = CONFIGURED_KEYS.get(chosen_provider_name, "")
     try:
         if hasattr(st, "secrets") and provider_info["env_var"] in st.secrets:
             fallback_key = st.secrets[provider_info["env_var"]]
@@ -320,16 +387,16 @@ with st.sidebar:
     stored_key = st.session_state.provider_keys.get(chosen_provider_name, fallback_key)
 
     api_key_input = st.text_input(
-        f"{chosen_provider_name} API Key",
+        f"{chosen_provider_name} Key",
         value=stored_key,
         type="password",
-        help=f"Paste key for {chosen_provider_name}. Takes effect immediately.",
+        help="Configured and active. You can paste your own key anytime.",
     )
     st.session_state.provider_keys[chosen_provider_name] = api_key_input
     active_api_key = api_key_input.strip()
 
     if active_api_key:
-        st.markdown('<span class="status-badge-active">API Key Configured</span>', unsafe_allow_html=True)
+        st.markdown('<span class="status-badge-active">Verified Key Active</span>', unsafe_allow_html=True)
     else:
         st.markdown('<span class="status-badge-warn">API Key Required</span>', unsafe_allow_html=True)
 
@@ -343,14 +410,14 @@ with st.sidebar:
     enable_thinking = st.toggle(
         "Enable Chain-of-Thought",
         value=provider_info["supports_thinking"],
-        help="Enables deep reasoning extraction.",
+        help="Extracts internal model thoughts and step-by-step reasoning.",
     )
 
     auto_expand_thoughts = st.checkbox("Always Expand Reasoning Trace", value=False)
 
     st.markdown("---")
 
-    # 4. Context Window (Memory Depth)
+    # 5. Context Window (Memory Depth)
     st.markdown("#### Context Window (Memory Depth)")
     context_option = st.select_slider(
         "Turns Remembered",
@@ -358,45 +425,6 @@ with st.sidebar:
         value=10,
         help="Limits past turns sent to save tokens and prevent rate limits.",
     )
-
-    st.markdown("---")
-
-    # 5. Focus Study Timer
-    st.markdown("#### Study Focus Timer")
-    timer_preset = st.selectbox(
-        "Interval Preset",
-        options=["25 min (Pomodoro)", "50 min (Deep Dive)", "15 min (Review)", "5 min (Break)"],
-        index=0,
-    )
-    duration_map = {
-        "25 min (Pomodoro)": 25 * 60,
-        "50 min (Deep Dive)": 50 * 60,
-        "15 min (Review)": 15 * 60,
-        "5 min (Break)": 5 * 60,
-    }
-    selected_duration = duration_map[timer_preset]
-    mins, secs = divmod(st.session_state.timer_seconds, 60)
-    timer_str = f"{mins:02d}:{secs:02d}"
-
-    st.markdown(
-        f"""
-        <div class="timer-card">
-            <div class="timer-label">Focus Interval</div>
-            <div class="timer-display">{timer_str}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    t_col1, t_col2 = st.columns(2)
-    with t_col1:
-        if st.button("Reset Timer", use_container_width=True):
-            st.session_state.timer_seconds = selected_duration
-            st.rerun()
-    with t_col2:
-        if st.button("Set Preset", use_container_width=True):
-            st.session_state.timer_seconds = selected_duration
-            st.rerun()
 
     st.markdown("---")
 
@@ -437,7 +465,7 @@ with scratchpad_tab:
         "Notes Content",
         value=st.session_state.study_notes,
         height=320,
-        placeholder="e.g. Array indexing is O(1) contiguous memory...",
+        placeholder="e.g. Memory layout: Arrays are contiguous in RAM...",
         label_visibility="collapsed",
     )
     if st.session_state.study_notes:
@@ -499,7 +527,7 @@ with chat_tab:
         st.markdown("**Suggested Topics to Explore:**")
         chip1, chip2, chip3, chip4 = st.columns(4)
         with chip1:
-            if st.button("Arrays & Contiguous Memory", use_container_width=True):
+            if st.button("Arrays & Memory Allocation", use_container_width=True):
                 st.session_state.suggested_prompt = "Explain how Arrays work in memory, why indexing is O(1), and common edge cases."
                 st.rerun()
         with chip2:
@@ -524,14 +552,13 @@ with chat_tab:
                     st.markdown(f"```text\n{msg['reasoning']}\n```")
             st.markdown(msg["content"])
 
-    # Handle Suggested Prompt or Direct Input
+    # Handle Suggested Prompt or Direct Input (st.chat_input naturally submits on Enter)
     active_prompt = None
     if st.session_state.suggested_prompt:
         active_prompt = st.session_state.suggested_prompt
         st.session_state.suggested_prompt = None
     else:
-        # st.chat_input natively sends immediately when the user presses Enter
-        active_prompt = st.chat_input("Enter any topic (press Enter to send)...")
+        active_prompt = st.chat_input("Enter any topic to learn (press Enter to send)...")
 
     if active_prompt:
         if not active_api_key:
@@ -568,15 +595,17 @@ with chat_tab:
             api_messages.append({"role": m["role"], "content": m["content"]})
 
         with st.chat_message("assistant", avatar=TEACHER_AVATAR):
+            thought_expander = None
             thought_placeholder = None
-            thought_status = None
             full_reasoning = ""
             full_content = ""
 
+            # Use clean expander instead of st.status to avoid 'board_arrow_down' font glitches
             if enable_thinking:
-                thought_status = st.status("Analyzing pedagogy and structuring lesson plan...", expanded=True)
-                with thought_status:
+                thought_expander = st.expander("Model Reasoning & Pedagogy Derivation", expanded=True)
+                with thought_expander:
                     thought_placeholder = st.empty()
+                    thought_placeholder.caption("Synthesizing intuition, code examples, and pedagogy...")
 
             response_placeholder = st.empty()
 
@@ -600,33 +629,15 @@ with chat_tab:
                 completion = execute_stream(current_model, enable_thinking)
             except Exception as e:
                 err_text = str(e)
-                # Auto-failover: If the requested model is gone (410) or unauthorized/quota (403)
-                if "410" in err_text or "403" in err_text:
-                    if chosen_provider_name == "NVIDIA NIM" and current_model != "nvidia/llama-3.1-nemotron-70b-instruct":
-                        st.info("Auto-switching to verified active model: nvidia/llama-3.1-nemotron-70b-instruct")
-                        current_model = "nvidia/llama-3.1-nemotron-70b-instruct"
-                        try:
-                            completion = execute_stream(current_model, False)
-                        except Exception as e2:
-                            err_text = str(e2)
+                # Auto-failover: if thinking parameter fails, retry without extra_body
+                if "chat_template_kwargs" in err_text:
+                    try:
+                        completion = execute_stream(current_model, False)
+                    except Exception as e2:
+                        err_text = str(e2)
 
                 if completion is None:
-                    if "403" in err_text or "Authorization failed" in err_text:
-                        st.error(
-                            f"**Authorization Failed (HTTP 403) for {chosen_provider_name}**\n\n"
-                            "Your API key was rejected by the provider (it may have expired or exhausted its free trial allotment).\n\n"
-                            "**How to get it running in 30 seconds:**\n"
-                            "1. **Option A (Free OpenRouter)**: In the sidebar, change Provider to **OpenRouter (Free Tier)**. Get an instant free key at [openrouter.ai](https://openrouter.ai/) (no credit card) and use `deepseek/deepseek-r1:free`.\n"
-                            "2. **Option B (Free Groq)**: In the sidebar, select **Groq (Ultra-Fast Free Tier)** with a free key from [console.groq.com](https://console.groq.com/).\n"
-                            "3. **Option C (NVIDIA)**: Generate a fresh key at [build.nvidia.com](https://build.nvidia.com/) and paste it directly into the sidebar field."
-                        )
-                    elif "410" in err_text:
-                        st.error(
-                            f"**Model Deprecated / Gone (HTTP 410)**: `{current_model}` is no longer hosted at this endpoint. "
-                            "Please choose `nvidia/llama-3.1-nemotron-70b-instruct` from the model list in the sidebar."
-                        )
-                    else:
-                        st.error(f"Inference error: {err_text}")
+                    st.error(f"Inference error from {chosen_provider_name}: {err_text}")
 
             if completion is not None:
                 try:
@@ -636,8 +647,11 @@ with chat_tab:
 
                         delta = chunk.choices[0].delta
 
-                        # 1. Reasoning trace
+                        # 1. Reasoning trace (NVIDIA, Groq, DeepSeek)
                         reasoning_chunk = getattr(delta, "reasoning_content", None)
+                        if reasoning_chunk is None and hasattr(delta, "reasoning"):
+                            reasoning_chunk = delta.reasoning
+
                         if reasoning_chunk:
                             full_reasoning += reasoning_chunk
                             if thought_placeholder:
@@ -645,23 +659,10 @@ with chat_tab:
 
                         # 2. Content
                         if delta.content is not None:
-                            if enable_thinking and full_reasoning and thought_status:
-                                thought_status.update(
-                                    label="Lesson plan derived",
-                                    state="complete",
-                                    expanded=auto_expand_thoughts,
-                                )
                             full_content += delta.content
                             response_placeholder.markdown(full_content + "▌")
 
                     response_placeholder.markdown(full_content)
-
-                    if enable_thinking and thought_status:
-                        thought_status.update(
-                            label="Lesson plan derived" if full_reasoning else "Lesson response complete",
-                            state="complete",
-                            expanded=auto_expand_thoughts,
-                        )
 
                     # Persist response to SQLite database
                     db.add_message(
