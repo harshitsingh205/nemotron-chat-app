@@ -16,9 +16,24 @@ st.set_page_config(
 # Initialize SQLite database
 db.init_db()
 
-# --- Avatars (Clean SVG Icons, No Font Glitches) ---
-STUDENT_AVATAR = "https://api.iconify.design/lucide:user.svg?color=%23475569"
-TEACHER_AVATAR = "https://api.iconify.design/lucide:graduation-cap.svg?color=%231e293b"
+import base64
+
+# --- Avatars (Self-Contained Embedded SVG Data URIs - Never Fail to Load) ---
+STUDENT_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="30" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
+  <circle cx="32" cy="24" r="10" fill="#475569"/>
+  <path d="M16 50c0-8.84 7.16-16 16-16s16 7.16 16 16" fill="#475569"/>
+</svg>"""
+
+TEACHER_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="30" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+  <path d="M32 18L14 28l18 10 18-10-18-10z" fill="#38bdf8"/>
+  <path d="M20 34v10c0 5 5.37 8 12 8s12-3 12-8V34" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M46 30v12" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
+</svg>"""
+
+STUDENT_AVATAR = f"data:image/svg+xml;base64,{base64.b64encode(STUDENT_SVG.strip().encode()).decode()}"
+TEACHER_AVATAR = f"data:image/svg+xml;base64,{base64.b64encode(TEACHER_SVG.strip().encode()).decode()}"
 
 # --- Professional CSS Styles ---
 st.markdown(
