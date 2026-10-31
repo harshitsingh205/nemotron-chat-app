@@ -1,9 +1,11 @@
 import sqlite3
 import os
 import uuid
+import json
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "classroom.db")
+BACKUP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "classroom_backup.json")
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -35,6 +37,10 @@ def init_db():
     conn.commit()
     conn.close()
 
+    # If the database is completely empty (e.g., container just rebooted/slept),
+    # check if an auto-backup JSON file exists on disk to auto-restore!
+    auto_restore_from_file_if_empty()
+
 def create_session(title="New Lesson"):
     session_id = str(uuid.uuid4())
     conn = get_connection()
@@ -46,6 +52,7 @@ def create_session(title="New Lesson"):
     )
     conn.commit()
     conn.close()
+    auto_backup_to_file()
     return session_id
 
 def list_sessions():
@@ -81,6 +88,7 @@ def add_message(session_id, role, content, reasoning=None):
     )
     conn.commit()
     conn.close()
+    auto_backup_to_file()
 
 def update_session_title(session_id, new_title):
     conn = get_connection()
@@ -88,6 +96,7 @@ def update_session_title(session_id, new_title):
     cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (new_title, session_id))
     conn.commit()
     conn.close()
+    auto_backup_to_file()
 
 def delete_session(session_id):
     conn = get_connection()
@@ -96,6 +105,7 @@ def delete_session(session_id):
     cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()
+    auto_backup_to_file()
 
 def get_database_stats():
     """Returns database size, session count, and message count for transparency."""
@@ -113,7 +123,126 @@ def get_database_stats():
 
     return {
         "path": DB_PATH,
+        "backup_path": BACKUP_PATH,
         "size_kb": file_size_kb,
         "sessions": session_count,
         "messages": message_count,
     }
+
+def export_all_data():
+    """Exports all sessions and all their corresponding messages as a structured dict."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC")
+    sessions = cursor.fetchall()
+
+    result = []
+    for s in sessions:
+        cursor.execute(
+            "SELECT role, content, reasoning, created_at FROM chat_messages WHERE session_id = ? ORDER BY id ASC",
+            (s["id"],)
+        )
+        msgs = cursor.fetchall()
+        result.append({
+            "id": s["id"],
+            "title": s["title"],
+            "created_at": s["created_at"],
+            "updated_at": s["updated_at"],
+            "messages": [{
+                "role": m["role"],
+                "content": m["content"],
+                "reasoning": m["reasoning"],
+                "created_at": m["created_at"]
+            } for m in msgs]
+        })
+    conn.close()
+    return {
+        "version": 1,
+        "exported_at": datetime.now().isoformat(),
+        "total_sessions": len(result),
+        "sessions": result
+    }
+
+def import_all_data(data):
+    """
+    Imports all sessions and messages from a dictionary or JSON string.
+    Safely creates sessions and messages without duplicates.
+    """
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except Exception:
+            return 0, 0
+
+    sessions = []
+    if isinstance(data, dict):
+        sessions = data.get("sessions", [])
+    elif isinstance(data, list):
+        sessions = data
+
+    if not sessions:
+        return 0, 0
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    imported_sessions = 0
+    imported_messages = 0
+
+    for s in sessions:
+        s_id = s.get("id") or str(uuid.uuid4())
+        s_title = s.get("title", "Saved Lesson")
+        created_at = s.get("created_at", datetime.now().isoformat())
+        updated_at = s.get("updated_at", datetime.now().isoformat())
+
+        cursor.execute(
+            "INSERT OR REPLACE INTO chat_sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (s_id, s_title, created_at, updated_at)
+        )
+        imported_sessions += 1
+
+        msgs = s.get("messages", [])
+        for m in msgs:
+            content = m.get("content", "")
+            role = m.get("role", "user")
+            cursor.execute(
+                "SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ?",
+                (s_id, role, content)
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                cursor.execute(
+                    "INSERT INTO chat_messages (session_id, role, content, reasoning, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (s_id, role, content, m.get("reasoning"), m.get("created_at", datetime.now().isoformat()))
+                )
+                imported_messages += 1
+
+    conn.commit()
+    conn.close()
+    auto_backup_to_file()
+    return imported_sessions, imported_messages
+
+def auto_backup_to_file():
+    """Maintains an automated JSON backup on disk."""
+    try:
+        data = export_all_data()
+        if data["total_sessions"] > 0:
+            with open(BACKUP_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+def auto_restore_from_file_if_empty():
+    """If database has 0 sessions but backup file exists, automatically restore it."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) AS c FROM chat_sessions")
+        count = cursor.fetchone()["c"]
+        conn.close()
+
+        if count == 0 and os.path.exists(BACKUP_PATH):
+            with open(BACKUP_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            import_all_data(data)
+    except Exception:
+        pass

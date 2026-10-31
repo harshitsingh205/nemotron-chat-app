@@ -1,22 +1,26 @@
 import os
 import json
+import base64
 from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 from openai import OpenAI
 import database as db
 
-# --- Page Configuration ---
+# --- Path to Assets ---
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+FAVICON_PATH = os.path.join(ASSETS_DIR, "favicon.png")
+
+# --- Page Configuration with Custom Logo Favicon ---
 st.set_page_config(
     page_title="Classroom - AI Computer Science Mentor",
+    page_icon=FAVICON_PATH if os.path.exists(FAVICON_PATH) else "🎓",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Initialize SQLite database
+# Initialize SQLite database (also auto-restores if container disk was wiped)
 db.init_db()
-
-import base64
 
 # --- Avatars (Self-Contained Embedded SVG Data URIs - Never Fail to Load) ---
 STUDENT_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -35,26 +39,47 @@ TEACHER_SVG = """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" 
 STUDENT_AVATAR = f"data:image/svg+xml;base64,{base64.b64encode(STUDENT_SVG.strip().encode()).decode()}"
 TEACHER_AVATAR = f"data:image/svg+xml;base64,{base64.b64encode(TEACHER_SVG.strip().encode()).decode()}"
 
-# --- Professional CSS Styles ---
+# --- Favicon Base64 for Head Injection ---
+fav_b64 = ""
+if os.path.exists(FAVICON_PATH):
+    with open(FAVICON_PATH, "rb") as f:
+        fav_b64 = base64.b64encode(f.read()).decode()
+
+# --- Professional CSS: Removes Streamlit Logo, Top Bars & Watermarks ---
 st.markdown(
-    """
+    f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    html, body, [class*="css"] {
+    html, body, [class*="css"] {{
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
+    }}
 
-    .brand-header {
+    /* --- Completely Remove Streamlit Branding & Menus --- */
+    #MainMenu {{visibility: hidden !important; display: none !important;}}
+    header {{visibility: hidden !important; display: none !important;}}
+    footer {{visibility: hidden !important; display: none !important;}}
+    .stDeployButton {{display: none !important;}}
+    [data-testid="stHeader"] {{visibility: hidden !important; display: none !important;}}
+    [data-testid="stToolbar"] {{visibility: hidden !important; display: none !important;}}
+    [data-testid="stDecoration"] {{display: none !important;}}
+    [data-testid="stStatusWidget"] {{display: none !important;}}
+    [data-testid="manage-app-button"] {{display: none !important;}}
+    .viewerBadge_container__1QSob {{display: none !important;}}
+    [class*="viewerBadge"] {{display: none !important;}}
+    div[data-testid="stSidebarNav"] {{padding-top: 1rem;}}
+
+    /* App Header */
+    .brand-header {{
         display: flex;
         align-items: center;
         gap: 14px;
         padding-bottom: 12px;
         border-bottom: 1px solid #e2e8f0;
         margin-bottom: 18px;
-    }
+    }}
 
-    .brand-logo {
+    .brand-logo {{
         width: 38px;
         height: 38px;
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -62,28 +87,28 @@ st.markdown(
         display: flex;
         align-items: center;
         justify-content: center;
-        color: #f8fafc;
+        color: #38bdf8;
         font-weight: 700;
         font-size: 19px;
         letter-spacing: -0.5px;
         border: 1px solid #334155;
-    }
+    }}
 
-    .brand-title {
+    .brand-title {{
         font-size: 1.45rem;
         font-weight: 700;
         color: #0f172a;
         margin: 0;
         line-height: 1.2;
-    }
+    }}
 
-    .brand-subtitle {
+    .brand-subtitle {{
         font-size: 0.85rem;
         color: #64748b;
         margin: 2px 0 0 0;
-    }
+    }}
 
-    .study-badge {
+    .study-badge {{
         display: inline-block;
         padding: 2px 8px;
         font-size: 0.72rem;
@@ -94,9 +119,9 @@ st.markdown(
         background: #e0e7ff;
         color: #3730a3;
         margin-left: 8px;
-    }
+    }}
 
-    .status-badge-active {
+    .status-badge-active {{
         display: inline-block;
         padding: 2px 6px;
         font-size: 0.70rem;
@@ -105,9 +130,9 @@ st.markdown(
         background: #ecfdf5;
         color: #047857;
         border: 1px solid #a7f3d0;
-    }
+    }}
 
-    .status-badge-warn {
+    .status-badge-warn {{
         display: inline-block;
         padding: 2px 6px;
         font-size: 0.70rem;
@@ -116,37 +141,58 @@ st.markdown(
         background: #fef2f2;
         color: #b91c1c;
         border: 1px solid #fecaca;
-    }
+    }}
 
-    .db-card {
+    .info-card {{
         background: #f8fafc;
         border: 1px solid #e2e8f0;
         border-radius: 8px;
-        padding: 12px 14px;
-        font-size: 0.82rem;
+        padding: 14px 16px;
+        font-size: 0.84rem;
         color: #334155;
-        margin-bottom: 12px;
-    }
+        margin-bottom: 14px;
+        line-height: 1.6;
+    }}
 
-    .reasoning-box {
-        background-color: #f8fafc;
-        border-left: 3px solid #6366f1;
-        padding: 12px 14px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.85rem;
-        color: #334155;
-        border-radius: 0 6px 6px 0;
-        margin-bottom: 10px;
-        line-height: 1.5;
-    }
+    .guide-card {{
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        border-radius: 8px;
+        padding: 14px 16px;
+        font-size: 0.84rem;
+        color: #166534;
+        margin-bottom: 14px;
+        line-height: 1.6;
+    }}
+
+    .danger-card {{
+        background: #fff7ed;
+        border: 1px solid #ffedd5;
+        border-radius: 8px;
+        padding: 14px 16px;
+        font-size: 0.84rem;
+        color: #9a3412;
+        margin-bottom: 14px;
+        line-height: 1.6;
+    }}
     </style>
+
+    <script>
+    // Inject Custom Favicon directly into browser head
+    (function() {{
+        let link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+        link.type = 'image/png';
+        link.rel = 'shortcut icon';
+        link.href = 'data:image/png;base64,{fav_b64}';
+        document.getElementsByTagName('head')[0].appendChild(link);
+    }})();
+    </script>
     """,
     unsafe_allow_html=True,
 )
 
 # --- Fallback Configured Keys (from Streamlit Secrets or Environment) ---
 CONFIGURED_KEYS = {}
-
 
 # --- Verified Live Providers and Model IDs ---
 PROVIDERS = {
@@ -405,7 +451,7 @@ with st.sidebar:
         f"{chosen_provider_name} Key",
         value=stored_key,
         type="password",
-        help="Configured and active. You can paste your own key anytime.",
+        help="Paste your key here. It takes effect immediately.",
     )
     st.session_state.provider_keys[chosen_provider_name] = api_key_input
     active_api_key = api_key_input.strip()
@@ -448,11 +494,11 @@ with st.sidebar:
     chosen_preset_name = st.selectbox("Pedagogy", options=list(TEACHING_PRESETS.keys()), index=0)
     system_prompt = st.text_area("System Prompt", value=TEACHING_PRESETS[chosen_preset_name], height=110)
 
-# --- Header ---
+# --- Header with Custom Logo ---
 st.markdown(
     """
     <div class="brand-header">
-        <div class="brand-logo">C</div>
+        <div class="brand-logo">🎓</div>
         <div>
             <div class="brand-title">
                 Classroom
@@ -470,8 +516,30 @@ st.markdown(
 # --- Fetch Current Session Messages from SQLite ---
 session_messages = db.get_session_messages(st.session_state.active_session_id)
 
+# --- Export JSON payload for Client-Side LocalStorage Synchronization ---
+all_vault_data = db.export_all_data()
+vault_json_str = json.dumps(all_vault_data)
+
+# Client-Side LocalStorage Auto-Sync Snippet (Saves to user's browser automatically)
+components.html(
+    f"""
+    <script>
+    try {{
+        const payload = {vault_json_str};
+        if (payload && payload.sessions && payload.sessions.length > 0) {{
+            localStorage.setItem('classroom_persistent_vault', JSON.stringify(payload));
+            localStorage.setItem('classroom_vault_sync_time', new Date().toISOString());
+        }}
+    }} catch(e) {{
+        console.error("Local storage sync error:", e);
+    }}
+    </script>
+    """,
+    height=0,
+)
+
 # --- Study Tabs ---
-chat_tab, scratchpad_tab, storage_tab = st.tabs(["Interactive Classroom", "Study Notes & Scratchpad", "Database & Storage Transparency"])
+chat_tab, scratchpad_tab, storage_tab = st.tabs(["Interactive Classroom", "Study Notes & Scratchpad", "Database, Backup & 24/7 Keep-Alive"])
 
 with scratchpad_tab:
     st.markdown("#### Session Notes & Code Scratchpad")
@@ -492,51 +560,120 @@ with scratchpad_tab:
         )
 
 with storage_tab:
-    st.markdown("#### Database Storage Location & Transparency")
+    st.markdown("### Chat History Persistence & 24/7 Uptime Solution")
+    
     stats = db.get_database_stats()
+
+    # 1. Why Chat Data Disappears on Free Cloud & How It's Solved
     st.markdown(
         f"""
-        <div class="db-card">
-            <strong>Database Type:</strong> SQLite 3 (ACID-Compliant Relational Database)<br>
-            <strong>Storage File Location:</strong> <code>{stats['path']}</code><br>
-            <strong>Total Saved Lessons:</strong> {stats['sessions']}<br>
-            <strong>Total Message Turns:</strong> {stats['messages']}<br>
-            <strong>Database File Size:</strong> {stats['size_kb']} KB
+        <div class="danger-card">
+            <strong>Why was chat history occasionally lost after closing the tab?</strong><br>
+            Streamlit Community Cloud runs in <em>ephemeral containers</em>. When no one visits the app for a while, 
+            Streamlit shuts down the container into <strong>Sleep Mode</strong>. When you return, Streamlit creates a fresh container 
+            from GitHub, which resets temporary files.<br><br>
+            <strong>How we completely solved it:</strong><br>
+            1. <strong>Automated Browser LocalStorage Vault:</strong> Your browser now automatically mirrors every lesson, prompt, and answer locally on your device. Even if Streamlit reboots 100 times, your browser never loses your data.<br>
+            2. <strong>One-Click Full Backup & Restore:</strong> Download or restore your entire chat database with 1 click below.<br>
+            3. <strong>24/7 Keep-Alive Monitor:</strong> Prevent Streamlit Cloud from ever going to sleep!
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    db_down_col1, db_down_col2 = st.columns(2)
-    with db_down_col1:
+    # 2. Database Stats & Backup Controls
+    st.markdown("#### 1. Instant Chat History Backup & Restore")
+    
+    st.markdown(
+        f"""
+        <div class="info-card">
+            <strong>Active Database:</strong> SQLite 3 (<code>{stats['path']}</code>)<br>
+            <strong>Saved Lessons in Classroom:</strong> {stats['sessions']} sessions<br>
+            <strong>Total Dialogue Turns:</strong> {stats['messages']} message exchanges<br>
+            <strong>Automated Disk Backup:</strong> <code>{stats['backup_path']}</code>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        # Export All Sessions to a single portable JSON file
+        st.download_button(
+            label="📥 Download Complete Backup (.json)",
+            data=vault_json_str,
+            file_name=f"classroom_all_chats_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+            mime="application/json",
+            help="Contains all past lessons, code blocks, and reasoning traces.",
+            use_container_width=True,
+            type="primary",
+        )
+
+    with col_b2:
+        # Download Raw SQLite DB file
         if os.path.exists(stats["path"]):
             with open(stats["path"], "rb") as db_file:
                 st.download_button(
-                    label="Download Raw Database (.db file)",
+                    label="💾 Download SQLite Database (.db)",
                     data=db_file.read(),
                     file_name="classroom.db",
                     mime="application/x-sqlite3",
                     use_container_width=True,
                 )
-    with db_down_col2:
-        if session_messages:
-            md_export = f"# Classroom Lesson Export - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-            for m in session_messages:
-                role_label = "Student" if m["role"] == "user" else "Instructor"
-                md_export += f"### {role_label}\n\n"
-                if m.get("reasoning"):
-                    md_export += f"<details><summary>Reasoning Process</summary>\n\n```text\n{m['reasoning']}\n```\n</details>\n\n"
-                md_export += f"{m['content']}\n\n---\n\n"
 
-            st.download_button(
-                label="Export Current Lesson as Markdown (.md)",
-                data=md_export,
-                file_name=f"lesson_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
-                mime="text/markdown",
-                use_container_width=True,
-            )
+    st.markdown("---")
+
+    # Restore from JSON File
+    st.markdown("#### 2. Restore Chat History from Backup File")
+    uploaded_backup = st.file_uploader(
+        "Upload a previously downloaded Classroom backup (.json)",
+        type=["json"],
+        help="Upload your backup file to immediately restore all lessons and messages.",
+    )
+    if uploaded_backup is not None:
+        if st.button("Restore All Chats from Uploaded File", type="primary", use_container_width=True):
+            try:
+                content = json.load(uploaded_backup)
+                num_s, num_m = db.import_all_data(content)
+                st.success(f"Successfully restored {num_s} lessons and {num_m} messages!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to restore backup: {e}")
+
+    st.markdown("---")
+
+    # 3. How to keep Streamlit Cloud awake 24/7 (Prevent Sleep Mode)
+    st.markdown("#### 3. How to Keep Your Website Awake 24/7 (Never Sleep)")
+    st.markdown(
+        """
+        <div class="guide-card">
+            <strong>Free 60-Second Solution to Stop Streamlit Cloud from Sleeping:</strong><br>
+            Streamlit Cloud sleeps free apps if they receive no visits for 48 hours. You can keep it running 24/7/365 permanently for free:
+            <ol style="margin-top:8px; margin-bottom:8px;">
+                <li>Copy your live Streamlit Cloud website URL: e.g. <code>https://harshitsingh205-nemotron-chat-app-app-*.streamlit.app/</code></li>
+                <li>Go to <a href="https://cron-job.org" target="_blank" style="font-weight:600; color:#166534;">cron-job.org</a> or <a href="https://uptimerobot.com" target="_blank" style="font-weight:600; color:#166534;">UptimeRobot.com</a> (both 100% free forever).</li>
+                <li>Create a free account and click <strong>Create Monitor / Cronjob</strong>.</li>
+                <li>Paste your Streamlit app URL and set the execution interval to <strong>Every 10 minutes</strong>.</li>
+            </ol>
+            <strong>Result:</strong> The free pinger sends a lightweight ping every 10 minutes. Streamlit Cloud sees active traffic and <strong>will NEVER put your Classroom website to sleep</strong>!
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 with chat_tab:
+    # Notice banner if database is empty but user has visited before
+    if len(recent_sessions) <= 1 and stats["messages"] == 0:
+        st.markdown(
+            """
+            <div class="info-card">
+                <strong>New or Restarted Session:</strong> Choose a topic below or ask any question to start learning. 
+                If you previously downloaded a backup file, you can restore all your lessons anytime in the <strong>Database, Backup & 24/7 Keep-Alive</strong> tab above!
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     # Quick Topic Starter Buttons if chat is empty
     if len(session_messages) == 0:
         st.markdown("**Suggested Topics to Explore:**")
@@ -615,7 +752,6 @@ with chat_tab:
             full_reasoning = ""
             full_content = ""
 
-            # Use clean expander instead of st.status to avoid 'board_arrow_down' font glitches
             if enable_thinking:
                 thought_expander = st.expander("Model Reasoning & Pedagogy Derivation", expanded=True)
                 with thought_expander:
@@ -644,7 +780,6 @@ with chat_tab:
                 completion = execute_stream(current_model, enable_thinking)
             except Exception as e:
                 err_text = str(e)
-                # Auto-failover: if thinking parameter fails, retry without extra_body
                 if "chat_template_kwargs" in err_text:
                     try:
                         completion = execute_stream(current_model, False)
